@@ -3,7 +3,7 @@ name: Checking Code Structure and Running Tests
 on:
   pull_request:
   push:
-    branches: [ "sre-analysis" ]  # so you can scan the pinned branch
+    branches: ["sre-analysis"]
 
 concurrency:
   group: check-${{ github.ref }}
@@ -12,15 +12,14 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     strategy:
       matrix:
         include:
-          # Explicit combos to keep from original file
           - python-version: "3.9"
             django-version: "4.2"
           - python-version: "3.13"
             django-version: "5.2"
-        # General matrix
         python-version: ["3.10", "3.11", "3.12"]
         django-version: ["4.2", "5.0", "5.1", "5.2"]
 
@@ -53,45 +52,50 @@ jobs:
           make sync
 
       - name: Run Lint and formatting checks
-        run: |
-          make checkformat
+        run: make checkformat
 
       - name: Run tests (matrix)
-        run: |
-          cd ${GITHUB_WORKSPACE} && uv run --with django~=${{ matrix.django-version }} quicktest.py
         env:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
+        run: |
+          uv run --with django~=${{ matrix.django-version }} quicktest.py
 
-      # -------------------- Generate coverage.xml ONCE --------------------
+      # --------- Generate coverage ONCE (py 3.11 + Django 5.1) ----------
       - name: Generate coverage.xml with coverage + quicktest
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
         env:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
         run: |
-          # Use the existing uv venv; install coverage
           uv pip install coverage
-          # Run the project's test harness under coverage, using the matrix's Django
-          # Point --source to the actual source directory
+          # Use the real source root for coverage:
           uv run --with django~=${{ matrix.django-version }} \
             python -m coverage run --branch --source=src/helpdesk quicktest.py
           uv run python -m coverage xml -o coverage.xml
           test -f coverage.xml && echo "coverage.xml generated"
 
-      # -------------------- SonarCloud -----------------------
+      - name: Upload coverage.xml (artifact)
+        if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+
+      # ----------------------- SonarCloud Scan ---------------------------
       - name: SonarCloud Scan
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
         uses: SonarSource/sonarcloud-github-action@v2
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}  # PR decoration
         with:
           projectBaseDir: .
           args: >
-            -Dsonar.projectKey=helpdesk_sre
-            -Dsonar.organization=https://sonarcloud.io/project/overview?id=Raffayy_django-helpdesk-sre
+            -Dsonar.host.url=https://sonarcloud.io
+            -Dsonar.projectKey=${{ secrets.SONAR_PROJECT_KEY }}
+            -Dsonar.organization=${{ secrets.SONAR_ORGANIZATION }}
             -Dsonar.sources=src/helpdesk
             -Dsonar.tests=tests
-            -Dsonar.inclusions=src/helpdesk/**/*.py
-            -Dsonar.exclusions=**/migrations/**,demodesk/**,docs/**,standalone/**,src/helpdesk/static/**,**/*.html
             -Dsonar.test.inclusions=tests/**/*.py
+            -Dsonar.exclusions=**/migrations/**,demodesk/**,docs/**,standalone/**,src/helpdesk/static/**,**/*.html
+            -Dsonar.python.version=${{ matrix.python-version }}
             -Dsonar.python.coverage.reportPaths=coverage.xml
-      
