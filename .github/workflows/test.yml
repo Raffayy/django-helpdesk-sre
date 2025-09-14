@@ -1,6 +1,9 @@
 name: Checking Code Structure and Running Tests
 
-on: [pull_request]
+on:
+  pull_request:
+  push:
+    branches: [ "sre-analysis" ]  # so you can scan the pinned branch
 
 concurrency:
   group: check-${{ github.ref }}
@@ -8,30 +11,31 @@ concurrency:
 
 jobs:
   build:
-
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          # Explicitly include Python 3.9 only with Django 4.2
+          # Explicit combos to keep from original file
           - python-version: "3.9"
             django-version: "4.2"
-          # Explicitly include Python 3.13 only with Django 5.2
           - python-version: "3.13"
             django-version: "5.2"
-        # Define the general matrix for Python with Django 
+        # General matrix
         python-version: ["3.10", "3.11", "3.12"]
         django-version: ["4.2", "5.0", "5.1", "5.2"]
+
     steps:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+
       - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
           cache-dependency-glob: "pyproject.toml"
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
@@ -40,21 +44,50 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
-          key: ${{ hashFiles('pyproject.toml') }}-${{ matrix.python-version }}-${{ matrix.django-version }} 
+          key: ${{ hashFiles('pyproject.toml') }}-${{ matrix.python-version }}-${{ matrix.django-version }}
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           uv venv
           make sync
-    
+
       - name: Run Lint and formatting checks
         run: |
           make checkformat
-    
-    
-      - name: Run tests
+
+      - name: Run tests (matrix)
         run: |
           cd ${GITHUB_WORKSPACE} && uv run --with django~=${{ matrix.django-version }} quicktest.py
         env:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
+
+      # -------------------- Generate coverage.xml ONCE --------------------
+      - name: Generate coverage.xml with pytest
+        if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
+        env:
+          DJANGO_SETTINGS_MODULE: helpdesk.settings
+        run: |
+          # test deps (you can keep using uv's venv created earlier)
+          uv pip install pytest pytest-cov pytest-django
+          uv run pytest -q --ds=helpdesk.settings \
+            --cov=helpdesk --cov-branch --cov-report=xml:coverage.xml
+
+
+      # -------------------- NEW: SonarCloud -----------------------
+      - name: SonarCloud Scan
+        if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
+        uses: SonarSource/sonarcloud-github-action@v2
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          projectBaseDir: .
+          args: >
+            -Dsonar.projectKey=helpdesk_sre
+            -Dsonar.organization=04c01b3e6e05e62612fe2e60a75b3423c3f43817
+            -Dsonar.sources=src/helpdesk
+            -Dsonar.tests=tests
+            -Dsonar.inclusions=src/helpdesk/**/*.py
+            -Dsonar.exclusions=**/migrations/**,demodesk/**,docs/**,standalone/**,src/helpdesk/static/**,**/*.html
+            -Dsonar.test.inclusions=tests/**/*.py
+            -Dsonar.python.coverage.reportPaths=coverage.xml
