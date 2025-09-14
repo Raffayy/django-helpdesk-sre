@@ -3,10 +3,7 @@ name: Checking Code Structure and Running Tests
 on:
   pull_request:
   push:
-    branches: ["sre-analysis", "main"]
-
-permissions:
-  contents: read
+    branches: ["sre-analysis"]
 
 concurrency:
   group: check-${{ github.ref }}
@@ -31,7 +28,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Install uv
+      - name: Install the latest version of uv
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
@@ -59,11 +56,12 @@ jobs:
         run: make checkformat
 
       - name: Run tests (matrix)
-        run: uv run --with django~=${{ matrix.django-version }} quicktest.py
         env:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
+        run: |
+          uv run --with django~=${{ matrix.django-version }} quicktest.py
 
-      # Generate coverage once (to avoid N duplicates)
+      # ---- Generate coverage.xml ONCE (Py 3.11 + Django 5.1) ----
       - name: Generate coverage.xml
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
         env:
@@ -73,23 +71,23 @@ jobs:
           uv run --with django~=${{ matrix.django-version }} \
             python -m coverage run --branch --source=src/helpdesk quicktest.py
           uv run python -m coverage xml -o coverage.xml
-          ls -lh coverage.xml
+          test -f coverage.xml && echo "coverage.xml generated"
 
+      # ---- SonarCloud scan (uses your project + org) ----
       - name: SonarCloud Scan
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
         uses: SonarSource/sonarcloud-github-action@v2
         env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}   # needed for PR decoration
+          SONAR_TOKEN:  ${{ secrets.SONAR_TOKEN }}    # the token you created ("sre")
         with:
+          projectBaseDir: .
           args: >
             -Dsonar.projectKey=Raffayy_django-helpdesk-sre
-            -Dsonar.organization=Raffayy
-            -Dsonar.projectName=django-helpdesk-sre
+            -Dsonar.organization=raffayy
             -Dsonar.sources=src/helpdesk
             -Dsonar.tests=tests
             -Dsonar.inclusions=src/helpdesk/**/*.py
             -Dsonar.exclusions=**/migrations/**,demodesk/**,docs/**,standalone/**,src/helpdesk/static/**,**/*.html
             -Dsonar.test.inclusions=tests/**/*.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
-            -Dsonar.ci.analysisMode=ci
-            -Dsonar.ci.autoScan=false
