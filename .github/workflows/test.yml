@@ -63,17 +63,19 @@ jobs:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
 
       # -------------------- Generate coverage.xml ONCE --------------------
-      - name: Generate coverage.xml (manage.py test with coverage)
+      - name: Generate coverage.xml with coverage + quicktest
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
         env:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
         run: |
           # Use the existing uv venv; install coverage
           uv pip install coverage
-          # IMPORTANT: src-layout → point --source to the folder, not just the module
-          uv run python -m coverage run --branch --source=src/helpdesk manage.py test -v 2
+          # Run the project's test harness under coverage, using the matrix's Django
+          # Point --source to the actual source directory
+          uv run --with django~=${{ matrix.django-version }} \
+            python -m coverage run --branch --source=src/helpdesk quicktest.py
           uv run python -m coverage xml -o coverage.xml
-          ls -lh coverage.xml
+          test -f coverage.xml && echo "coverage.xml generated"
 
       # -------------------- SonarCloud -----------------------
       - name: SonarCloud Scan
@@ -85,12 +87,11 @@ jobs:
           projectBaseDir: .
           args: >
             -Dsonar.projectKey=helpdesk_sre
-            -Dsonar.organization=<YOUR_SONARCLOUD_ORG_SLUG>
+            -Dsonar.organization=https://sonarcloud.io/project/overview?id=Raffayy_django-helpdesk-sre
             -Dsonar.sources=src/helpdesk
             -Dsonar.tests=tests
             -Dsonar.inclusions=src/helpdesk/**/*.py
             -Dsonar.exclusions=**/migrations/**,demodesk/**,docs/**,standalone/**,src/helpdesk/static/**,**/*.html
             -Dsonar.test.inclusions=tests/**/*.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
-      
       
