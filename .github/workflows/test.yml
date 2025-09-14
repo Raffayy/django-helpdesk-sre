@@ -73,7 +73,6 @@ jobs:
           uv run pytest -q --ds=helpdesk.settings \
             --cov=helpdesk --cov-branch --cov-report=xml:coverage.xml
 
-
       # -------------------- NEW: SonarCloud -----------------------
       - name: SonarCloud Scan
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
