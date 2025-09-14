@@ -63,17 +63,20 @@ jobs:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
 
       # -------------------- Generate coverage.xml ONCE --------------------
-      - name: Generate coverage.xml with pytest
+      - name: Generate coverage.xml with coverage + quicktest
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
         env:
           DJANGO_SETTINGS_MODULE: helpdesk.settings
         run: |
-          # test deps (you can keep using uv's venv created earlier)
-          uv pip install pytest pytest-cov pytest-django
-          uv run pytest -q --ds=helpdesk.settings \
-            --cov=helpdesk --cov-branch --cov-report=xml:coverage.xml
+          # Use the existing uv venv; install coverage
+          uv pip install coverage
+          # Run the project's test harness under coverage, using the matrix's Django
+          uv run --with django~=${{ matrix.django-version }} \
+            python -m coverage run --branch --source=helpdesk quicktest.py
+          uv run python -m coverage xml -o coverage.xml
+          test -f coverage.xml && echo "coverage.xml generated"
 
-      # -------------------- NEW: SonarCloud -----------------------
+      # -------------------- SonarCloud -----------------------
       - name: SonarCloud Scan
         if: matrix.python-version == '3.11' && matrix.django-version == '5.1'
         uses: SonarSource/sonarcloud-github-action@v2
@@ -83,10 +86,11 @@ jobs:
           projectBaseDir: .
           args: >
             -Dsonar.projectKey=helpdesk_sre
-            -Dsonar.organization=04c01b3e6e05e62612fe2e60a75b3423c3f43817
+            -Dsonar.organization=https://sonarcloud.io/project/overview?id=Raffayy_django-helpdesk-sre
             -Dsonar.sources=src/helpdesk
             -Dsonar.tests=tests
             -Dsonar.inclusions=src/helpdesk/**/*.py
             -Dsonar.exclusions=**/migrations/**,demodesk/**,docs/**,standalone/**,src/helpdesk/static/**,**/*.html
             -Dsonar.test.inclusions=tests/**/*.py
             -Dsonar.python.coverage.reportPaths=coverage.xml
+      
